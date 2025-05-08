@@ -2,465 +2,227 @@
 
 import type React from "react"
 import { useState, useEffect, useCallback } from "react"
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  ActivityIndicator,
-  RefreshControl,
-  Alert,
-  ScrollView,
-} from "react-native"
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, RefreshControl } from "react-native"
 import { useTheme } from "../../contexts/ThemeContext"
 import { useAuth } from "../../contexts/AuthContext"
-import { Ionicons } from "@expo/vector-icons"
 import type { NativeStackScreenProps } from "@react-navigation/native-stack"
 import type { CompositeScreenProps } from "@react-navigation/native"
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs"
 import type { AppStackParamList, MainTabsParamList } from "../../navigation"
-import { getScannedProducts, deleteScannedProduct } from "../../services/api"
+import {
+  getScanHistory,
+  type DisplayableHistoryProduct,
+} from "../../services/api"
 import ProductCard from "../../components/ProductCard"
 import EmptyState from "../../components/EmptyState"
 import SearchBar from "../../components/SearchBar"
 import FilterChip from "../../components/FilterChip"
-import { formatDate } from "../../utils/formatters"
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabsParamList, "History">,
   NativeStackScreenProps<AppStackParamList>
 >
 
-interface ScannedProduct {
-  id: string
-  barcode: string
-  product_name: string
-  product_image: string
-  brand: string
-  nutrition_grade: string
-  health_score?: number
-  sustainability_score?: number
-  scanned_at: string
-}
-
-// Definizione dei filtri disponibili
-const NUTRITION_GRADES = ["a", "b", "c", "d", "e"]
-const HEALTH_SCORE_RANGES = [
-  { label: "Eccellente (80-100)", min: 80, max: 100 },
-  { label: "Buono (60-79)", min: 60, max: 79 },
-  { label: "Medio (40-59)", min: 40, max: 59 },
-  { label: "Scarso (20-39)", min: 20, max: 39 },
-  { label: "Pessimo (0-19)", min: 0, max: 19 },
-]
-const SUSTAINABILITY_SCORE_RANGES = [
-  { label: "Eccellente (80-100)", min: 80, max: 100 },
-  { label: "Buono (60-79)", min: 60, max: 79 },
-  { label: "Medio (40-59)", min: 40, max: 59 },
-  { label: "Scarso (20-39)", min: 20, max: 39 },
-  { label: "Pessimo (0-19)", min: 0, max: 19 },
-]
-
 const HistoryScreen: React.FC<Props> = ({ navigation }) => {
-  const [products, setProducts] = useState<ScannedProduct[]>([])
-  const [filteredProducts, setFilteredProducts] = useState<ScannedProduct[]>([])
+  const [products, setProducts] = useState<DisplayableHistoryProduct[]>([])
+  const [filteredProducts, setFilteredProducts] = useState<DisplayableHistoryProduct[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedGrades, setSelectedGrades] = useState<string[]>([])
-  const [selectedHealthRanges, setSelectedHealthRanges] = useState<number[]>([])
-  const [selectedSustainabilityRanges, setSelectedSustainabilityRanges] = useState<number[]>([])
-  const [activeFilterTab, setActiveFilterTab] = useState<"nutrition" | "health" | "sustainability">("nutrition")
+  const [activeFilter, setActiveFilter] = useState<string | null>(null)
   const { colors } = useTheme()
   const { user } = useAuth()
 
-  useEffect(() => {
-    fetchScannedProducts()
-  }, [])
-
-  useEffect(() => {
-    filterProducts()
-  }, [products, searchQuery, selectedGrades, selectedHealthRanges, selectedSustainabilityRanges])
-
-  const fetchScannedProducts = async () => {
+  const loadProducts = useCallback(async () => {
     if (!user) return
 
     setLoading(true)
     try {
-      const data = await getScannedProducts(user.id)
-      setProducts(data)
+      console.log("[HISTORY] Caricamento cronologia per utente:", user.id);
+      const historyProducts = await getScanHistory(user.id)
+      console.log(`[HISTORY] Recuperati ${historyProducts.length} prodotti dalla cronologia.`);
+      
+      setProducts(historyProducts)
+      setFilteredProducts(historyProducts)
     } catch (error) {
-      Alert.alert(
-        "Errore",
-        error instanceof Error ? error.message : "Si è verificato un errore durante il recupero dei prodotti.",
-      )
+      console.error("Errore nel caricamento dei prodotti della cronologia:", error)
+      Alert.alert("Errore", "Si è verificato un errore durante il caricamento della cronologia.")
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [user])
+
+  useEffect(() => {
+    if (user) {
+    loadProducts()
+    }
+  }, [loadProducts, user])
 
   const handleRefresh = () => {
     setRefreshing(true)
-    fetchScannedProducts()
+    loadProducts()
   }
 
-  const handleProductPress = (barcode: string) => {
-    navigation.navigate("ProductDetail", { barcode })
+  const handleSearch = (query: string) => {
+    setSearchQuery(query)
+    filterProducts(query, activeFilter)
   }
 
-  const handleDeleteProduct = async (id: string) => {
-    try {
-      await deleteScannedProduct(id)
-      setProducts(products.filter((product) => product.id !== id))
-      Alert.alert("Successo", "Prodotto eliminato dalla cronologia.")
-    } catch (error) {
-      Alert.alert(
-        "Errore",
-        error instanceof Error ? error.message : "Si è verificato un errore durante l'eliminazione del prodotto.",
-      )
-    }
+  const handleFilter = (filter: string | null) => {
+    setActiveFilter(filter)
+    filterProducts(searchQuery, filter)
   }
 
-  const confirmDelete = (id: string) => {
-    Alert.alert("Conferma eliminazione", "Sei sicuro di voler eliminare questo prodotto dalla cronologia?", [
-      { text: "Annulla", style: "cancel" },
-      { text: "Elimina", style: "destructive", onPress: () => handleDeleteProduct(id) },
-    ])
-  }
+  const filterProducts = (query: string, filter: string | null) => {
+    let tempFiltered = [...products]
 
-  const filterProducts = useCallback(() => {
-    let filtered = [...products]
-
-    // Filtra per query di ricerca
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      filtered = filtered.filter(
-        (product) => product.product_name.toLowerCase().includes(query) || product.brand.toLowerCase().includes(query),
+    if (query) {
+      const lowercaseQuery = query.toLowerCase()
+      tempFiltered = tempFiltered.filter(
+        (product) =>
+          (product.product_name && product.product_name.toLowerCase().includes(lowercaseQuery)) ||
+          (product.brand && product.brand.toLowerCase().includes(lowercaseQuery)) ||
+          (product.barcode && product.barcode.toLowerCase().includes(lowercaseQuery))
       )
     }
 
-    // Filtra per grado nutrizionale
-    if (selectedGrades.length > 0) {
-      filtered = filtered.filter((product) => selectedGrades.includes(product.nutrition_grade.toLowerCase()))
+    if (filter) {
+      switch (filter) {
+        case "health_high":
+          tempFiltered = tempFiltered.filter((product) => product.health_score !== undefined && product.health_score >= 70)
+          break
+        case "health_low":
+          tempFiltered = tempFiltered.filter((product) => product.health_score !== undefined && product.health_score < 30)
+          break
+        case "sustainability_high":
+          tempFiltered = tempFiltered.filter((product) => product.sustainability_score !== undefined && product.sustainability_score >= 70)
+          break
+        case "sustainability_low":
+          tempFiltered = tempFiltered.filter((product) => product.sustainability_score !== undefined && product.sustainability_score < 30)
+          break
+      }
     }
-
-    // Filtra per punteggio di salute
-    if (selectedHealthRanges.length > 0) {
-      filtered = filtered.filter((product) => {
-        if (!product.health_score) return false
-        return selectedHealthRanges.some((rangeIndex) => {
-          const range = HEALTH_SCORE_RANGES[rangeIndex]
-          return product.health_score >= range.min && product.health_score <= range.max
-        })
-      })
-    }
-
-    // Filtra per punteggio di sostenibilità
-    if (selectedSustainabilityRanges.length > 0) {
-      filtered = filtered.filter((product) => {
-        if (!product.sustainability_score) return false
-        return selectedSustainabilityRanges.some((rangeIndex) => {
-          const range = SUSTAINABILITY_SCORE_RANGES[rangeIndex]
-          return product.sustainability_score >= range.min && product.sustainability_score <= range.max
-        })
-      })
-    }
-
-    setFilteredProducts(filtered)
-  }, [products, searchQuery, selectedGrades, selectedHealthRanges, selectedSustainabilityRanges])
-
-  const toggleGradeFilter = (grade: string) => {
-    if (selectedGrades.includes(grade)) {
-      setSelectedGrades(selectedGrades.filter((g) => g !== grade))
-    } else {
-      setSelectedGrades([...selectedGrades, grade])
-    }
+    setFilteredProducts(tempFiltered)
   }
 
-  const toggleHealthRangeFilter = (index: number) => {
-    if (selectedHealthRanges.includes(index)) {
-      setSelectedHealthRanges(selectedHealthRanges.filter((i) => i !== index))
-    } else {
-      setSelectedHealthRanges([...selectedHealthRanges, index])
-    }
-  }
-
-  const toggleSustainabilityRangeFilter = (index: number) => {
-    if (selectedSustainabilityRanges.includes(index)) {
-      setSelectedSustainabilityRanges(selectedSustainabilityRanges.filter((i) => i !== index))
-    } else {
-      setSelectedSustainabilityRanges([...selectedSustainabilityRanges, index])
-    }
-  }
-
-  const clearFilters = () => {
-    setSearchQuery("")
-    setSelectedGrades([])
-    setSelectedHealthRanges([])
-    setSelectedSustainabilityRanges([])
-  }
-
-  const renderProductItem = ({ item }: { item: ScannedProduct }) => (
-    <View style={styles.productItemContainer}>
-      <ProductCard
-        productName={item.product_name}
-        brand={item.brand}
-        imageUrl={item.product_image}
-        nutritionGrade={item.nutrition_grade}
-        healthScore={item.health_score}
-        sustainabilityScore={item.sustainability_score}
-        onPress={() => handleProductPress(item.barcode)}
-      />
-      <View style={styles.productItemFooter}>
-        <Text style={styles.dateText}>{formatDate(item.scanned_at)}</Text>
-        <TouchableOpacity style={styles.deleteButton} onPress={() => confirmDelete(item.id)}>
-          <Ionicons name="trash-outline" size={20} color={colors.error} />
-        </TouchableOpacity>
-      </View>
-    </View>
+  const renderItem = ({ item }: { item: DisplayableHistoryProduct }) => (
+    <ProductCard
+      productName={item.product_name || "Nome non disponibile"}
+      brand={item.brand || "Marca non disponibile"}
+      imageUrl={item.product_image}
+      nutritionGrade={item.nutrition_grade}
+      healthScore={item.health_score}
+      sustainabilityScore={item.sustainability_score}
+      onPress={() => navigation.navigate("ProductDetail", { productRecordId: item.id })}
+      scannedAt={item.user_scan_time}
+    />
   )
-
-  const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    content: {
-      padding: 16,
-    },
-    loadingContainer: {
-      flex: 1,
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    header: {
-      marginBottom: 16,
-    },
-    title: {
-      fontSize: 24,
-      fontWeight: "bold",
-      color: colors.text,
-      marginBottom: 8,
-    },
-    subtitle: {
-      fontSize: 16,
-      color: colors.text + "80",
-      marginBottom: 16,
-    },
-    filtersContainer: {
-      marginBottom: 16,
-    },
-    filtersRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      marginBottom: 8,
-    },
-    filterLabel: {
-      fontSize: 14,
-      color: colors.text,
-      marginBottom: 8,
-    },
-    clearFiltersButton: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    clearFiltersText: {
-      fontSize: 14,
-      color: colors.primary,
-      marginLeft: 4,
-    },
-    productItemContainer: {
-      marginBottom: 16,
-    },
-    productItemFooter: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      paddingHorizontal: 8,
-      marginTop: 4,
-    },
-    dateText: {
-      fontSize: 12,
-      color: colors.text + "80",
-    },
-    deleteButton: {
-      padding: 4,
-    },
-    emptyFiltersContainer: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: colors.card,
-      padding: 12,
-      borderRadius: 8,
-      marginBottom: 16,
-    },
-    emptyFiltersText: {
-      fontSize: 14,
-      color: colors.text + "80",
-      marginLeft: 8,
-    },
-    tabsContainer: {
-      flexDirection: "row",
-      marginBottom: 15,
-      borderRadius: 8,
-      overflow: "hidden",
-      backgroundColor: colors.border + "40",
-    },
-    tab: {
-      flex: 1,
-      paddingVertical: 10,
-      alignItems: "center",
-    },
-    activeTab: {
-      backgroundColor: colors.primary,
-    },
-    tabText: {
-      fontSize: 14,
-      fontWeight: "500",
-    },
-    activeTabText: {
-      color: "#FFFFFF",
-    },
-  })
 
   if (loading && !refreshing) {
     return (
-      <View style={[styles.container, styles.loadingContainer]}>
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
     )
   }
 
-  if (products.length === 0) {
-    return (
-      <EmptyState
-        icon="time-outline"
-        title="Nessun prodotto scannerizzato"
-        message="Non hai ancora scannerizzato nessun prodotto. Inizia a scannerizzare per vedere la tua cronologia."
-        actionLabel="Scansiona un prodotto"
-        onAction={() => navigation.navigate("Home")}
-      />
+  if (!user) {
+     return (
+      <View style={[styles.container, { backgroundColor: colors.background, flex: 1}]}>
+        <EmptyState
+          title="Cronologia non disponibile"
+          message="Effettua il login per visualizzare la tua cronologia di scansioni."
+          icon="log-in-outline"
+          onRetry={() => { /* Potrebbe navigare al login o non fare nulla */ }}
+        />
+      </View>
+    );
+  }
+
+  if (products.length === 0 && !loading) {
+  return (
+      <View style={[styles.container, { backgroundColor: colors.background, flex: 1}]}>
+        <SearchBar 
+            searchQuery={searchQuery} 
+            onSearch={handleSearch} 
+            placeholder="Cerca nella cronologia..." 
+        />
+        <EmptyState
+          title="Nessun prodotto scansionato"
+          message="La tua cronologia è vuota. Inizia a scansionare prodotti!"
+          icon="archive-outline"
+          onRetry={loadProducts}
+          />
+      </View>
     )
   }
 
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={filteredProducts}
-        keyExtractor={(item) => item.id}
-        renderItem={renderProductItem}
-        contentContainerStyle={styles.content}
-        ListHeaderComponent={
-          <>
-            <View style={styles.header}>
-              <Text style={styles.title}>La tua cronologia</Text>
-              <Text style={styles.subtitle}>
-                {products.length} {products.length === 1 ? "prodotto" : "prodotti"} scannerizzati
-              </Text>
-            </View>
-
-            <SearchBar
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onClear={() => setSearchQuery("")}
-              placeholder="Cerca per nome o marca..."
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+          <FlatList
+            data={filteredProducts}
+            renderItem={renderItem}
+        keyExtractor={(item) => item.history_id}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={(
+          <View style={styles.header}>
+            <Text style={[styles.title, { color: colors.text }]}>Cronologia Scansioni</Text>
+            <SearchBar 
+                searchQuery={searchQuery} 
+                onSearch={handleSearch} 
+                placeholder="Cerca per nome, marca, barcode..." 
             />
-
             <View style={styles.filtersContainer}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                <Text style={styles.filterLabel}>Filtra per:</Text>
-                {(selectedGrades.length > 0 ||
-                  selectedHealthRanges.length > 0 ||
-                  selectedSustainabilityRanges.length > 0 ||
-                  searchQuery) && (
-                  <TouchableOpacity style={styles.clearFiltersButton} onPress={clearFilters}>
-                    <Ionicons name="close-circle-outline" size={16} color={colors.primary} />
-                    <Text style={styles.clearFiltersText}>Cancella filtri</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              <View style={styles.tabsContainer}>
-                <TouchableOpacity
-                  style={[styles.tab, activeFilterTab === "nutrition" && styles.activeTab]}
-                  onPress={() => setActiveFilterTab("nutrition")}
-                >
-                  <Text style={[styles.tabText, activeFilterTab === "nutrition" && styles.activeTabText]}>
-                    Nutri-Score
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.tab, activeFilterTab === "health" && styles.activeTab]}
-                  onPress={() => setActiveFilterTab("health")}
-                >
-                  <Text style={[styles.tabText, activeFilterTab === "health" && styles.activeTabText]}>Salute</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.tab, activeFilterTab === "sustainability" && styles.activeTab]}
-                  onPress={() => setActiveFilterTab("sustainability")}
-                >
-                  <Text style={[styles.tabText, activeFilterTab === "sustainability" && styles.activeTabText]}>
-                    Sostenibilità
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={styles.filtersRow}>
-                  {activeFilterTab === "nutrition" &&
-                    NUTRITION_GRADES.map((grade) => (
-                      <FilterChip
-                        key={grade}
-                        label={`Nutri-Score ${grade.toUpperCase()}`}
-                        selected={selectedGrades.includes(grade)}
-                        onPress={() => toggleGradeFilter(grade)}
-                      />
-                    ))}
-
-                  {activeFilterTab === "health" &&
-                    HEALTH_SCORE_RANGES.map((range, index) => (
-                      <FilterChip
-                        key={`health-${index}`}
-                        label={range.label}
-                        selected={selectedHealthRanges.includes(index)}
-                        onPress={() => toggleHealthRangeFilter(index)}
-                      />
-                    ))}
-
-                  {activeFilterTab === "sustainability" &&
-                    SUSTAINABILITY_SCORE_RANGES.map((range, index) => (
-                      <FilterChip
-                        key={`sustainability-${index}`}
-                        label={range.label}
-                        selected={selectedSustainabilityRanges.includes(index)}
-                        onPress={() => toggleSustainabilityRangeFilter(index)}
-                      />
-                    ))}
-                </View>
-              </ScrollView>
+              <FilterChip label="Tutti" onPress={() => handleFilter(null)} isActive={!activeFilter} />
+              <FilterChip label="Salute Alta" onPress={() => handleFilter("health_high")} isActive={activeFilter === "health_high"} />
+              <FilterChip label="Salute Bassa" onPress={() => handleFilter("health_low")} isActive={activeFilter === "health_low"} />
+              <FilterChip label="Sost. Alta" onPress={() => handleFilter("sustainability_high")} isActive={activeFilter === "sustainability_high"} />
+              <FilterChip label="Sost. Bassa" onPress={() => handleFilter("sustainability_low")} isActive={activeFilter === "sustainability_low"} />
             </View>
-
-            {filteredProducts.length === 0 && (
-              <View style={styles.emptyFiltersContainer}>
-                <Ionicons name="information-circle-outline" size={20} color={colors.text + "80"} />
-                <Text style={styles.emptyFiltersText}>Nessun prodotto corrisponde ai filtri selezionati</Text>
-              </View>
-            )}
-          </>
-        }
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            colors={[colors.primary]}
-            tintColor={colors.primary}
-          />
+          </View>
+        )}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[colors.primary]} tintColor={colors.primary}/>}
+        ListEmptyComponent={
+          !loading && products.length > 0 ? (
+             <View style={{marginTop: 20}}>
+                <EmptyState
+                title="Nessun risultato"
+                message="Nessun prodotto corrisponde ai criteri di ricerca o filtro."
+                icon="search-outline"
+                />
+      </View>
+          ) : null
         }
       />
     </View>
   )
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "bold",
+    marginBottom: 16,
+  },
+  filtersContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+})
 
 export default HistoryScreen

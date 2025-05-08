@@ -16,6 +16,10 @@ import ProfileScreen from "../screens/app/ProfileScreen"
 import HistoryScreen from "../screens/app/HistoryScreen"
 import ProductDetailScreen from "../screens/app/ProductDetailScreen"
 
+// Importa i tipi necessari
+import type { RawProductData } from "../services/api";
+import type { GeminiAnalysisResult } from "../services/gemini";
+
 // Definizione dei tipi per la navigazione
 export type AuthStackParamList = {
   Login: undefined
@@ -24,7 +28,11 @@ export type AuthStackParamList = {
 
 export type AppStackParamList = {
   MainTabs: undefined
-  ProductDetail: { barcode: string }
+  ProductDetail: { 
+    productRecordId: string;
+    initialProductData?: RawProductData | null;
+    aiAnalysisResult?: GeminiAnalysisResult | null;
+  }
 }
 
 export type MainTabsParamList = {

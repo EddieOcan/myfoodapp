@@ -12,7 +12,12 @@ interface SearchBarProps {
   placeholder?: string
 }
 
-const SearchBar: React.FC<SearchBarProps> = ({ value, onChangeText, onClear, placeholder = "Cerca..." }) => {
+const SearchBar: React.FC<SearchBarProps> = ({ 
+  value = "", // Fornisci un valore predefinito
+  onChangeText, 
+  onClear, 
+  placeholder = "Cerca..." 
+}) => {
   const { colors } = useTheme()
 
   const styles = StyleSheet.create({
@@ -52,7 +57,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ value, onChangeText, onClear, pla
         autoCapitalize="none"
         autoCorrect={false}
       />
-      {value.length > 0 && (
+      {value && value.length > 0 && (
         <TouchableOpacity style={styles.clearButton} onPress={onClear}>
           <Ionicons name="close-circle" size={20} color={colors.text + "80"} />
         </TouchableOpacity>

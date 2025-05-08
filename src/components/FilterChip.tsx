@@ -3,14 +3,16 @@
 import type React from "react"
 import { TouchableOpacity, Text, StyleSheet } from "react-native"
 import { useTheme } from "../contexts/ThemeContext"
+import { Ionicons } from "@expo/vector-icons"
 
 interface FilterChipProps {
   label: string
-  selected: boolean
+  isActive: boolean
   onPress: () => void
+  icon?: keyof typeof Ionicons.glyphMap
 }
 
-const FilterChip: React.FC<FilterChipProps> = ({ label, selected, onPress }) => {
+const FilterChip: React.FC<FilterChipProps> = ({ label, isActive, onPress, icon }) => {
   const { colors } = useTheme()
 
   const styles = StyleSheet.create({
@@ -20,19 +22,26 @@ const FilterChip: React.FC<FilterChipProps> = ({ label, selected, onPress }) => 
       borderRadius: 16,
       marginRight: 8,
       marginBottom: 8,
-      backgroundColor: selected ? colors.primary : colors.card,
+      backgroundColor: isActive ? colors.primary : colors.card,
       borderWidth: 1,
-      borderColor: selected ? colors.primary : colors.border,
+      borderColor: isActive ? colors.primary : colors.border,
+      flexDirection: "row",
+      alignItems: "center",
     },
     label: {
-      color: selected ? "#FFFFFF" : colors.text,
+      color: isActive ? "#FFFFFF" : colors.text,
       fontSize: 14,
-      fontWeight: selected ? "bold" : "normal",
+      fontWeight: isActive ? "bold" : "normal",
+      marginLeft: icon ? 4 : 0,
+    },
+    icon: {
+      marginRight: 4,
     },
   })
 
   return (
     <TouchableOpacity style={styles.chip} onPress={onPress}>
+      {icon && <Ionicons name={icon} size={14} color={isActive ? "#FFFFFF" : colors.text} style={styles.icon} />}
       <Text style={styles.label}>{label}</Text>
     </TouchableOpacity>
   )
