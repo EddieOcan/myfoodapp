@@ -25,3 +25,22 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# testing
+/coverage
+
+# misc
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# expo
+.expo/
+dist/
+web-build/
+
+# native
+ios/
+android/
